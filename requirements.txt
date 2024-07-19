@@ -3,4 +3,4 @@ seaborn
 pandas
 numpy
 matplotlib
-LabelEncoder, OneHotEncoder, StandardScaler, MinMaxScaler
+scikit-learn
