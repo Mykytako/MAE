@@ -3,7 +3,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler, MinMaxScaler
+from sklearn.preprocessing import LabelEncoder, StandardScaler, MinMaxScaler
+import pickle
 
 # Define a function to handle missing values
 def handle_missing_values(df, column, method, custom_value=None):
@@ -33,14 +34,54 @@ def cap_outliers(df, column, factor):
     df[column] = np.where(df[column] > top_boundary, top_boundary, df[column])
     df[column] = np.where(df[column] < bottom_boundary, bottom_boundary, df[column])
 
+def save_progress():
+    with open('progress.pkl', 'wb') as f:
+        pickle.dump({
+            'data': st.session_state.data,
+            'mapping': st.session_state.mapping,
+            'label_encoded_cols': st.session_state.label_encoded_cols,
+            'onehot_encoded_cols': st.session_state.onehot_encoded_cols,
+            'handled_missing': st.session_state.handled_missing,
+            'capped_outliers': st.session_state.capped_outliers
+        }, f)
+
+def load_progress():
+    try:
+        with open('progress.pkl', 'rb') as f:
+            progress = pickle.load(f)
+            st.session_state.data = progress['data']
+            st.session_state.mapping = progress['mapping']
+            st.session_state.label_encoded_cols = progress['label_encoded_cols']
+            st.session_state.onehot_encoded_cols = progress['onehot_encoded_cols']
+            st.session_state.handled_missing = progress['handled_missing']
+            st.session_state.capped_outliers = progress['capped_outliers']
+    except FileNotFoundError:
+        pass
+
+# Initialize session state
+if 'data' not in st.session_state:
+    st.session_state.data = None
+
+if 'mapping' not in st.session_state:
+    st.session_state.mapping = {}
+
+if 'label_encoded_cols' not in st.session_state:
+    st.session_state.label_encoded_cols = []
+
+if 'onehot_encoded_cols' not in st.session_state:
+    st.session_state.onehot_encoded_cols = []
+
+if 'handled_missing' not in st.session_state:
+    st.session_state.handled_missing = []
+
+if 'capped_outliers' not in st.session_state:
+    st.session_state.capped_outliers = []
+
+# Load progress from file
+load_progress()
+
 def main():
     st.title("Preprocessing Dashboard")
-
-    if 'data' not in st.session_state:
-        st.session_state.data = None
-
-    if 'mapping' not in st.session_state:
-        st.session_state.mapping = {}
 
     # Upload dataset
     file = st.file_uploader("Upload your dataset", type=["csv", "xlsx"])
@@ -49,6 +90,7 @@ def main():
             st.session_state.data = pd.read_csv(file)
         else:
             st.session_state.data = pd.read_excel(file)
+        save_progress()
 
     if st.session_state.data is not None:
         df = st.session_state.data.copy()
@@ -56,6 +98,24 @@ def main():
         # Apply existing mappings
         for col, mapping in st.session_state.mapping.items():
             df[col] = df[col].map(mapping)
+
+        # Apply existing label encodings
+        if st.session_state.label_encoded_cols:
+            le = LabelEncoder()
+            for col in st.session_state.label_encoded_cols:
+                df[col] = le.fit_transform(df[col])
+
+        # Apply existing one hot encodings
+        if st.session_state.onehot_encoded_cols:
+            df = pd.get_dummies(df, columns=st.session_state.onehot_encoded_cols)
+
+        # Apply existing missing value handling
+        for (col, method, custom_value) in st.session_state.handled_missing:
+            handle_missing_values(df, col, method, custom_value)
+
+        # Apply existing outlier capping
+        for (col, factor) in st.session_state.capped_outliers:
+            cap_outliers(df, col, factor)
 
         # Display EDA
         st.header("Exploratory Data Analysis")
@@ -120,6 +180,7 @@ def main():
         if st.button("Drop Duplicates"):
             df.drop_duplicates(inplace=True)
             st.session_state.data = df.copy()
+            save_progress()
             st.write("Duplicates dropped. Current shape:", df.shape)
 
         # Fill or drop missing values
@@ -134,6 +195,8 @@ def main():
             if st.button("Handle Missing Values"):
                 if handle_missing_values(df, selected_missing_col, missing_method, custom_value):
                     st.session_state.data = df.copy()
+                    st.session_state.handled_missing.append((selected_missing_col, missing_method, custom_value))
+                    save_progress()
                     st.write("Missing values handled.")
 
         # Encode selected columns
@@ -145,9 +208,15 @@ def main():
                 le = LabelEncoder()
                 for col in label_encode_cols:
                     df[col] = le.fit_transform(df[col])
+                    if col not in st.session_state.label_encoded_cols:
+                        st.session_state.label_encoded_cols.append(col)
             if onehot_encode_cols:
                 df = pd.get_dummies(df, columns=onehot_encode_cols)
+                for col in onehot_encode_cols:
+                    if col not in st.session_state.onehot_encoded_cols:
+                        st.session_state.onehot_encoded_cols.append(col)
             st.session_state.data = df.copy()
+            save_progress()
             st.write("Columns encoded.")
 
         # Cap outliers
@@ -158,7 +227,9 @@ def main():
             if st.button("Cap Outliers"):
                 for col in selected_outlier_cols:
                     cap_outliers(df, col, outlier_factor)
+                    st.session_state.capped_outliers.append((col, outlier_factor))
                 st.session_state.data = df.copy()
+                save_progress()
                 st.write("Outliers capped.")
 
         # Map custom values
@@ -174,6 +245,7 @@ def main():
                 st.session_state.mapping[map_col] = map_dict
                 df[map_col] = df[map_col].map(map_dict)
                 st.session_state.data = df.copy()
+                save_progress()
                 st.write("Values mapped.")
 
         # Scale selected columns
@@ -188,6 +260,7 @@ def main():
                     scaler = MinMaxScaler()
                 df[scale_cols] = scaler.fit_transform(df[scale_cols])
                 st.session_state.data = df.copy()
+                save_progress()
                 st.write("Columns scaled.")
 
         # Display preprocessed EDA
