@@ -73,12 +73,12 @@ def load_progress():
     try:
         with open('progress.pkl', 'rb') as f:
             progress = pickle.load(f)
-            st.session_state.data = progress['data']
-            st.session_state.mapping = progress['mapping']
-            st.session_state.label_encoded_cols = progress['label_encoded_cols']
-            st.session_state.onehot_encoded_cols = progress['onehot_encoded_cols']
-            st.session_state.handled_missing = progress['handled_missing']
-            st.session_state.capped_outliers = progress['capped_outliers']
+            st.session_state.data = progress.get('data', None)
+            st.session_state.mapping = progress.get('mapping', {})
+            st.session_state.label_encoded_cols = progress.get('label_encoded_cols', [])
+            st.session_state.onehot_encoded_cols = progress.get('onehot_encoded_cols', [])
+            st.session_state.handled_missing = progress.get('handled_missing', [])
+            st.session_state.capped_outliers = progress.get('capped_outliers', [])
     except FileNotFoundError:
         pass
 
@@ -99,7 +99,9 @@ def reset_to_original():
 def apply_mapping(df, column, mapping):
     try:
         col_type = df[column].dtype
-        df[column] = df[column].map(mapping)
+        for key, value in mapping.items():
+            if value != "":
+                df.loc[df[column] == key, column] = value
         # Convert column type back if necessary
         if col_type in ['int64', 'float64']:
             try:
@@ -280,14 +282,6 @@ def main():
         # Preprocessing steps
         st.header("Preprocessing Steps")
 
-        # Drop duplicates
-        st.markdown('<div>Drop Duplicates <span class="tooltip">ℹ️<span class="tooltiptext">This removes duplicate rows from the dataset.</span></span></div>', unsafe_allow_html=True)
-        if st.button("Drop Duplicates"):
-            df.drop_duplicates(inplace=True)
-            st.session_state.data = df.copy()
-            save_progress()
-            st.write("Duplicates dropped. Current shape:", df.shape)
-
         # Fill or drop missing values
         st.markdown('<div>Handle Missing Values <span class="tooltip">ℹ️<span class="tooltiptext">This handles missing values by dropping or filling them with specified methods.</span></span></div>', unsafe_allow_html=True)
         missing_cols = df.columns[df.isnull().any()].tolist()
@@ -353,7 +347,8 @@ def main():
                         new_values.append((val, new_value))
             if st.button("Map Values"):
                 for old_val, new_val in new_values:
-                    map_dict[old_val] = new_val
+                    if new_val:
+                        map_dict[old_val] = new_val
                 st.session_state.mapping[map_col] = map_dict
                 apply_mapping(df, map_col, map_dict)
                 st.session_state.data = df.copy()
@@ -374,6 +369,14 @@ def main():
                 st.session_state.data = df.copy()
                 save_progress()
                 st.write("Columns scaled.")
+
+        # Drop duplicates
+        st.markdown('<div>Drop Duplicates <span class="tooltip">ℹ️<span class="tooltiptext">This removes duplicate rows from the dataset.</span></span></div>', unsafe_allow_html=True)
+        if st.button("Drop Duplicates"):
+            df.drop_duplicates(inplace=True)
+            st.session_state.data = df.copy()
+            save_progress()
+            st.write("Duplicates dropped. Current shape:", df.shape)
 
         # Display preprocessed EDA
         st.header("Preprocessed Exploratory Data Analysis")
@@ -399,6 +402,7 @@ def main():
 
         st.markdown('<div>Outlier Detection <span class="tooltip">ℹ️<span class="tooltiptext">This identifies columns with outliers using the IQR method.</span></span></div>', unsafe_allow_html=True)
         outlier_columns = []
+        numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
         for col in numeric_cols:
             q1, q3 = df[col].quantile([0.25, 0.75])
             iqr = q3 - q1
@@ -407,6 +411,13 @@ def main():
             if ((df[col] < bottom_boundary) | (df[col] > top_boundary)).any():
                 outlier_columns.append(col)
         st.write("Columns with outliers:", outlier_columns)
+        
+        # Add box plot in the Preprocessed EDA section
+        selected_outlier_col_preprocessed = st.selectbox("Select a column to view outliers (after preprocessing)", outlier_columns)
+        if selected_outlier_col_preprocessed:
+            fig, ax = plt.subplots()
+            sns.boxplot(x=df[selected_outlier_col_preprocessed], ax=ax)
+            st.pyplot(fig)
 
         st.markdown('<div>First Few Rows <span class="tooltip">ℹ️<span class="tooltiptext">This displays the first few rows of the dataset.</span></span></div>', unsafe_allow_html=True)
         st.write(df.head())
